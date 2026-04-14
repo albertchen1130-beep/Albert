@@ -1,0 +1,56 @@
+name: Biweekly Report / 双周报
+
+on:
+  # Manual trigger - can be run from GitHub mobile app
+  workflow_dispatch:
+    inputs:
+      period:
+        description: 'Report period in days / 报告周期（天数）'
+        required: false
+        default: '14'
+        type: choice
+        options:
+          - '7'
+          - '14'
+          - '30'
+
+  # Automatic trigger: every other Monday at 9:00 AM UTC
+  schedule:
+    - cron: '0 9 1,15 * *'
+
+permissions:
+  contents: write
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for accurate git log
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Generate biweekly report
+        env:
+          REPORT_PERIOD: ${{ github.event.inputs.period || '14' }}
+        run: python scripts/biweekly_report.py
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: biweekly-report-${{ github.run_id }}
+          path: reports/*.md
+          retention-days: 90
+
+      - name: Commit report to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/
+          git diff --staged --quiet || git commit -m "docs: add biweekly report $(date +%Y-%m-%d)"
+          git push
