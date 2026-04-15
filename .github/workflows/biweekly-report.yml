@@ -1,56 +1,125 @@
-name: Biweekly Report / 双周报
+name: "Biweekly Report / 双周报生成"
 
 on:
-  # Manual trigger - can be run from GitHub mobile app
+  # Manual trigger from GitHub mobile app or web
   workflow_dispatch:
     inputs:
       period:
-        description: 'Report period in days / 报告周期（天数）'
+        description: "报告期间 (如: 2025-04-01 ~ 2025-04-15)"
         required: false
-        default: '14'
-        type: choice
-        options:
-          - '7'
-          - '14'
-          - '30'
+        default: ""
+        type: string
 
-  # Automatic trigger: every other Monday at 9:00 AM UTC
+  # Auto trigger on 1st and 15th of each month
   schedule:
-    - cron: '0 9 1,15 * *'
+    - cron: "0 9 1,15 * *"
 
 permissions:
   contents: write
+  pull-requests: write
+  issues: read
 
 jobs:
   generate-report:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for accurate git log
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: "3.12"
 
-      - name: Generate biweekly report
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate inputs exist
+        run: |
+          echo "📂 Checking inputs directory..."
+          ls -la inputs/ || echo "No inputs directory"
+
+          FOUND=0
+          [ -f inputs/hk_peers.txt ] && echo "✅ hk_peers.txt found" && FOUND=1
+          [ -f inputs/table6.txt ] && echo "✅ table6.txt found" && FOUND=1
+          ls inputs/*.xlsx 2>/dev/null && echo "✅ Excel file found" && FOUND=1
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo "❌ No input files found in inputs/ directory."
+            echo "Please upload at least one of: hk_peers.txt, table6.txt, *.xlsx"
+            exit 1
+          fi
+
+      - name: Run multi-agent pipeline
         env:
-          REPORT_PERIOD: ${{ github.event.inputs.period || '14' }}
-        run: python scripts/biweekly_report.py
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REPORT_PERIOD: ${{ github.event.inputs.period }}
+        run: |
+          python -m scripts.orchestrator \
+            --inputs-dir inputs \
+            --output-dir reports \
+            --period "$REPORT_PERIOD"
 
-      - name: Upload report artifact
+      - name: Upload report artifacts
         uses: actions/upload-artifact@v4
         with:
           name: biweekly-report-${{ github.run_id }}
-          path: reports/*.md
+          path: |
+            reports/final_*.md
+            reports/draft_*.md
+            reports/sections_*/
           retention-days: 90
 
-      - name: Commit report to repository
+      - name: Create PR with report for review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          BRANCH="report/biweekly-$(date +%Y%m%d)"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
           git add reports/
-          git diff --staged --quiet || git commit -m "docs: add biweekly report $(date +%Y-%m-%d)"
-          git push
+          git commit -m "docs: 双周报 $(date +%Y-%m-%d) - AI生成初稿+张总审查"
+          git push -u origin "$BRANCH"
+
+          # Create PR for 张总 to review
+          gh pr create \
+            --title "双周报 $(date +%Y-%m-%d) - 待审阅" \
+            --body "$(cat <<'EOF'
+          ## 双周报自动生成完毕
+
+          本PR包含由AI多Agent系统自动生成的双周报，已经过张总审查Agent初审。
+
+          ### 包含文件
+          - `reports/final_*.md` - 终稿（含张总审查修改）
+          - `reports/draft_*.md` - 初稿（审查前）
+          - `reports/sections_*/` - 各板块独立输出
+
+          ### Agent运行流程
+          1. ✅ HKPeersAgent - 香港同业信息整理
+          2. ✅ Table6Agent - 表6数据处理
+          3. ✅ ETFAgent - 表4-5 ETF分析
+          4. ✅ ComparisonAgent - 与上期对比
+          5. ✅ CompilerAgent - 汇总编撰
+          6. ✅ ReviewerAgent - 张总审查
+
+          ### 请张总审阅
+          请查看 `final_*.md` 文件，如需修改可直接在PR中编辑或留下评论。
+          审阅完毕后请合并PR。
+          EOF
+          )" \
+            --reviewer "" \
+            --label "双周报"
+
+      - name: Print report to summary
+        run: |
+          FINAL=$(ls -t reports/final_*.md 2>/dev/null | head -1)
+          if [ -n "$FINAL" ]; then
+            echo "## 双周报终稿" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat "$FINAL" >> $GITHUB_STEP_SUMMARY
+          fi

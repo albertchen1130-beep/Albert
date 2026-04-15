@@ -1,0 +1,64 @@
+name: "📊 双周报数据提交 / Biweekly Report Input"
+description: "提交双周报所需的原始数据（适用于手机端）"
+title: "双周报数据提交 - "
+labels: ["双周报", "数据输入"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 双周报数据提交
+
+        请在下方填写本期双周报所需的数据。填写完毕后：
+        1. 提交此Issue
+        2. 将ETF Excel文件上传至仓库 `inputs/` 目录
+        3. 在 Actions 页面手动触发 "Biweekly Report / 双周报生成" workflow
+
+  - type: input
+    id: period
+    attributes:
+      label: "报告期间"
+      description: "本期双周报覆盖的时间范围"
+      placeholder: "例: 2025-04-01 ~ 2025-04-15"
+    validations:
+      required: true
+
+  - type: textarea
+    id: hk_peers
+    attributes:
+      label: "八、香港同业信息（文字8）"
+      description: "粘贴香港同业信息的原始文字材料"
+      placeholder: |
+        在此粘贴香港同业信息...
+        可以是零散笔记、新闻摘要、市场动态等
+        Agent会自动整理为规范格式
+    validations:
+      required: true
+
+  - type: textarea
+    id: table6
+    attributes:
+      label: "表6信息"
+      description: "粘贴表6的原始数据"
+      placeholder: |
+        在此粘贴表6数据...
+        可以是文字描述或表格数据
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ### 表4-5 ETF Excel
+        ⚠️ GitHub Issue 不支持直接上传Excel。请通过以下方式提交：
+        1. 在仓库中进入 `inputs/` 目录
+        2. 点击 "Add file" > "Upload files"
+        3. 上传 Excel 文件（命名为 `etf_data.xlsx`）
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: "补充说明（可选）"
+      description: "其他需要注意的事项"
+      placeholder: "如有特别需要关注的事项请在此说明"
+    validations:
+      required: false

@@ -1,0 +1,80 @@
+name: "Issue → Inputs / 从Issue提取数据"
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  extract-inputs:
+    # Only run when the "双周报" label is added
+    if: github.event.label.name == '双周报'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract data from issue body
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          mkdir -p inputs
+
+          # Extract HK Peers section
+          echo "$ISSUE_BODY" | python3 -c "
+          import sys, re
+          body = sys.stdin.read()
+
+          # Extract section between '香港同业信息' header and next header
+          sections = re.split(r'###\s+', body)
+          for s in sections:
+              if '香港同业信息' in s or 'hk_peers' in s.lower():
+                  # Remove the header line, keep content
+                  lines = s.split('\n', 1)
+                  if len(lines) > 1:
+                      content = lines[1].strip()
+                      if content and content != '_No response_':
+                          with open('inputs/hk_peers.txt', 'w') as f:
+                              f.write(content)
+                          print('✅ Extracted hk_peers.txt')
+
+              if '表6' in s or 'table6' in s.lower():
+                  lines = s.split('\n', 1)
+                  if len(lines) > 1:
+                      content = lines[1].strip()
+                      if content and content != '_No response_':
+                          with open('inputs/table6.txt', 'w') as f:
+                              f.write(content)
+                          print('✅ Extracted table6.txt')
+          " || echo "⚠️  Could not parse issue body, trying fallback..."
+
+          # Fallback: save entire issue body if parsing failed
+          if [ ! -f inputs/hk_peers.txt ] && [ ! -f inputs/table6.txt ]; then
+            echo "$ISSUE_BODY" > inputs/issue_raw.txt
+            echo "⚠️  Saved raw issue body to inputs/issue_raw.txt"
+          fi
+
+          ls -la inputs/
+
+      - name: Commit extracted inputs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add inputs/
+          git diff --staged --quiet || git commit -m "data: 从Issue提取双周报输入数据 #${{ github.event.issue.number }}"
+          git push
+
+      - name: Comment on issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment ${{ github.event.issue.number }} --body "✅ 数据已提取并保存至 \`inputs/\` 目录。
+
+          **下一步：**
+          1. 如需上传ETF Excel，请上传到 \`inputs/etf_data.xlsx\`
+          2. 前往 [Actions](/${{ github.repository }}/actions) 页面
+          3. 手动触发 **Biweekly Report / 双周报生成** workflow"
