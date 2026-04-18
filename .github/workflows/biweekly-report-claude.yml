@@ -1,0 +1,227 @@
+name: 双周报生成 (Claude Code)
+
+on:
+  workflow_dispatch:
+    inputs:
+      period_start:
+        description: '报告周期开始日期 (YYYY-MM-DD，留空则自动计算为14天前)'
+        required: false
+        type: string
+      period_end:
+        description: '报告周期结束日期 (YYYY-MM-DD，留空则为今天)'
+        required: false
+        type: string
+      skip_review:
+        description: '跳过张总审查直接生成'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python dependencies
+        run: pip install openpyxl
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Prepare output directories
+        run: mkdir -p outputs/sections reports
+
+      - name: Calculate report period
+        id: period
+        run: |
+          if [ -n "${{ inputs.period_start }}" ]; then
+            echo "start=${{ inputs.period_start }}" >> $GITHUB_OUTPUT
+          else
+            echo "start=$(date -d '14 days ago' +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          fi
+          if [ -n "${{ inputs.period_end }}" ]; then
+            echo "end=${{ inputs.period_end }}" >> $GITHUB_OUTPUT
+          else
+            echo "end=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          fi
+          echo "today=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
+      - name: Check input files
+        id: inputs
+        run: |
+          echo "=== Checking input files ==="
+          has_etf=false
+          has_table6=false
+          has_hk=false
+          has_prev=false
+
+          if [ "$(ls -A inputs/表4-5-ETF/ 2>/dev/null | grep -v .gitkeep)" ]; then
+            has_etf=true
+            echo "✅ 表4-5 ETF files found"
+          else
+            echo "⚠️ No 表4-5 ETF files"
+          fi
+
+          if [ "$(ls -A inputs/表6/ 2>/dev/null | grep -v .gitkeep)" ]; then
+            has_table6=true
+            echo "✅ 表6 files found"
+          else
+            echo "⚠️ No 表6 files"
+          fi
+
+          if [ "$(ls -A inputs/香港同业信息/ 2>/dev/null | grep -v .gitkeep)" ]; then
+            has_hk=true
+            echo "✅ 香港同业信息 files found"
+          else
+            echo "⚠️ No 香港同业信息 files"
+          fi
+
+          if [ "$(ls -A inputs/上期双周报/ 2>/dev/null | grep -v .gitkeep)" ]; then
+            has_prev=true
+            echo "✅ 上期双周报 files found"
+          else
+            echo "⚠️ No 上期双周报 files"
+          fi
+
+          echo "has_etf=$has_etf" >> $GITHUB_OUTPUT
+          echo "has_table6=$has_table6" >> $GITHUB_OUTPUT
+          echo "has_hk=$has_hk" >> $GITHUB_OUTPUT
+          echo "has_prev=$has_prev" >> $GITHUB_OUTPUT
+
+      - name: "Agent 1: 处理表4-5 ETF数据"
+        if: steps.inputs.outputs.has_etf == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "你是双周报的ETF数据处理agent。请执行以下操作：
+          1. 运行 python3 scripts/excel_to_markdown.py inputs/表4-5-ETF/ 查看Excel/CSV数据
+          2. 同时直接读取 inputs/表4-5-ETF/ 下的所有 .md 和 .txt 文件
+          3. 将所有数据整理为格式化的Markdown表格
+          4. 保存输出到 outputs/sections/表4-5-ETF数据.md
+          请保持数据精度，表格清晰对齐。" --dangerously-skip-permissions
+
+      - name: "Agent 2: 处理表6信息"
+        if: steps.inputs.outputs.has_table6 == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "你是双周报的表6数据处理agent。请执行以下操作：
+          1. 如果有Excel文件，运行 python3 scripts/excel_to_markdown.py inputs/表6/ 查看数据
+          2. 读取 inputs/表6/ 下的所有文件
+          3. 将数据整理为格式化的Markdown格式
+          4. 保存输出到 outputs/sections/表6信息.md
+          请保持数据完整性和精度。" --dangerously-skip-permissions
+
+      - name: "Agent 3: 处理香港同业信息"
+        if: steps.inputs.outputs.has_hk == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "你是双周报的香港同业信息处理agent。请执行以下操作：
+          1. 读取 inputs/香港同业信息/ 下的所有 .md 和 .txt 文件
+          2. 按主题分类整理信息
+          3. 使用正式的报告语言风格
+          4. 保存输出到 outputs/sections/8-香港同业信息.md
+          请保持信息的客观性和准确性。" --dangerously-skip-permissions
+
+      - name: "Agent 4: 汇编完整双周报"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REPORT_PERIOD_START: ${{ steps.period.outputs.start }}
+          REPORT_PERIOD_END: ${{ steps.period.outputs.end }}
+          REPORT_DATE: ${{ steps.period.outputs.today }}
+        run: |
+          claude -p "你是双周报的报告汇编agent。请执行以下操作：
+          1. 读取 inputs/上期双周报/ 中的上期双周报作为格式参考
+          2. 读取 outputs/sections/ 中所有已生成的章节文件
+          3. 读取 templates/report-template.md 了解报告结构
+          4. 参照上期双周报的格式，将各章节内容汇编为完整双周报
+          5. 报告周期: ${REPORT_PERIOD_START} ~ ${REPORT_PERIOD_END}
+          6. 生成日期: ${REPORT_DATE}
+          7. 保存到 outputs/双周报-${REPORT_DATE}.md 和 reports/双周报-${REPORT_DATE}.md
+          对于缺失的章节，参考上期内容标注'本期暂无更新'。" --dangerously-skip-permissions
+
+      - name: "Agent 5: 张总审查"
+        if: inputs.skip_review != true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REPORT_DATE: ${{ steps.period.outputs.today }}
+        run: |
+          claude -p "你是双周报的审查agent，模拟张总视角审查报告。请执行以下操作：
+          1. 读取 outputs/双周报-${REPORT_DATE}.md
+          2. 对比 inputs/上期双周报/ 中的上期双周报
+          3. 从内容完整性、数据准确性、文字质量、格式规范四个维度审查
+          4. 生成审查意见到 outputs/审查意见.md
+          5. 如果发现必须修改的问题（如格式错误、明显数据问题），直接修正双周报文件
+          6. 修正后的文件同步更新到 reports/ 目录
+          请给出具体的修改建议。" --dangerously-skip-permissions
+
+      - name: Upload report artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 双周报-${{ steps.period.outputs.today }}
+          path: |
+            outputs/
+            reports/
+          retention-days: 90
+
+      - name: Commit reports to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/ outputs/
+          git diff --staged --quiet || git commit -m "docs: 双周报 ${{ steps.period.outputs.today }} (Claude Code 自动生成)"
+          git push
+
+      - name: Create PR for review (if not skipped)
+        if: inputs.skip_review != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="biweekly-report/${{ steps.period.outputs.today }}"
+          git checkout -b "$BRANCH"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "双周报 ${{ steps.period.outputs.start }} ~ ${{ steps.period.outputs.end }}" \
+            --body "## 双周报自动生成完成
+
+          **报告周期**: ${{ steps.period.outputs.start }} ~ ${{ steps.period.outputs.end }}
+          **生成日期**: ${{ steps.period.outputs.today }}
+
+          ### 生成步骤
+          - [x] Agent 1: 表4-5 ETF数据处理
+          - [x] Agent 2: 表6信息处理
+          - [x] Agent 3: 香港同业信息处理
+          - [x] Agent 4: 报告汇编
+          - [x] Agent 5: 张总审查
+
+          ### 审查意见
+          请查看 \`outputs/审查意见.md\` 了解详细审查结果。
+
+          ### 请张总审阅
+          请审阅报告内容，如需修改可直接在 PR 中 comment 或编辑文件。
+          确认无误后请 Approve 并 Merge。
+
+          ---
+          > 由 Claude Code 双周报系统自动生成" \
+            --reviewer "$(gh api user --jq '.login')" || true
