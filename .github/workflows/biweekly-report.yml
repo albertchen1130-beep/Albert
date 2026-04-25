@@ -1,25 +1,33 @@
-name: Biweekly Report / 双周报
+name: 双周报生成 / Biweekly Report
 
 on:
-  # Manual trigger - can be run from GitHub mobile app
   workflow_dispatch:
     inputs:
-      period:
-        description: 'Report period in days / 报告周期（天数）'
+      period_start:
+        description: '报告起始日期 (YYYY-MM-DD)'
         required: false
-        default: '14'
+        type: string
+      period_end:
+        description: '报告结束日期 (YYYY-MM-DD)'
+        required: false
+        type: string
+      run_mode:
+        description: '运行模式'
+        required: false
+        default: 'full'
         type: choice
         options:
-          - '7'
-          - '14'
-          - '30'
+          - 'full'
+          - 'preprocess-only'
+          - 'compile-only'
 
-  # Automatic trigger: every other Monday at 9:00 AM UTC
   schedule:
     - cron: '0 9 1,15 * *'
 
 permissions:
   contents: write
+  pull-requests: write
+  issues: read
 
 jobs:
   generate-report:
@@ -28,29 +36,90 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for accurate git log
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - name: Generate biweekly report
-        env:
-          REPORT_PERIOD: ${{ github.event.inputs.period || '14' }}
-        run: python scripts/biweekly_report.py
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      - name: Upload report artifact
+      - name: Validate inputs
+        run: python scripts/validate_inputs.py || true
+
+      - name: Run report generation
+        env:
+          RUN_MODE: ${{ github.event.inputs.run_mode || 'full' }}
+          PERIOD_START: ${{ github.event.inputs.period_start || '' }}
+          PERIOD_END: ${{ github.event.inputs.period_end || '' }}
+        run: |
+          ARGS=""
+          if [ "$RUN_MODE" = "full" ]; then
+            ARGS="--run-all"
+          elif [ "$RUN_MODE" = "preprocess-only" ]; then
+            ARGS="--preprocess-only"
+          elif [ "$RUN_MODE" = "compile-only" ]; then
+            ARGS="--compile-only"
+          fi
+
+          if [ -n "$PERIOD_START" ]; then
+            ARGS="$ARGS --period-start $PERIOD_START"
+          fi
+          if [ -n "$PERIOD_END" ]; then
+            ARGS="$ARGS --period-end $PERIOD_END"
+          fi
+
+          python scripts/orchestrator.py $ARGS
+
+      - name: Upload outputs
         uses: actions/upload-artifact@v4
         with:
-          name: biweekly-report-${{ github.run_id }}
-          path: reports/*.md
+          name: biweekly-outputs-${{ github.run_id }}
+          path: |
+            outputs/
+            reports/
           retention-days: 90
 
-      - name: Commit report to repository
+      - name: Commit and create PR
+        if: github.event.inputs.run_mode != 'preprocess-only'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add reports/
-          git diff --staged --quiet || git commit -m "docs: add biweekly report $(date +%Y-%m-%d)"
-          git push
+
+          BRANCH="biweekly-report/$(date +%Y-%m-%d)"
+          git checkout -b "$BRANCH"
+
+          git add outputs/ reports/
+          git diff --staged --quiet && echo "No changes to commit" && exit 0
+
+          git commit -m "docs: 双周报 $(date +%Y-%m-%d)"
+          git push -u origin "$BRANCH"
+
+          gh pr create \
+            --title "双周报审核 - $(date +%Y-%m-%d)" \
+            --body "## 双周报已生成
+
+          请张总审核本期双周报。
+
+          ### 文件列表
+          $(find reports/ -name '*.md' -newer .git/HEAD | sed 's/^/- /')
+
+          ### 操作
+          - 审核通过请 Approve
+          - 需要修改请在对应行添加评论" \
+            --draft
+
+      - name: Summary
+        run: |
+          echo "## 双周报生成完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f outputs/07_review_summary.md ]; then
+            cat outputs/07_review_summary.md >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 生成的报告" >> $GITHUB_STEP_SUMMARY
+          find reports/ -name '*.md' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY

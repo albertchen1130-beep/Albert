@@ -1,0 +1,87 @@
+name: Issue数据提取 / Extract Issue Data
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  extract-input:
+    if: contains(github.event.issue.labels.*.name, 'biweekly-input')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract data from issue
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 << 'SCRIPT'
+          import os
+          import re
+
+          body = os.environ.get("ISSUE_BODY", "")
+
+          def extract_section(body, heading):
+              pattern = rf"### {re.escape(heading)}\s*\n(.*?)(?=\n### |\Z)"
+              match = re.search(pattern, body, re.DOTALL)
+              if match:
+                  return match.group(1).strip()
+              return ""
+
+          period = extract_section(body, "报告期间")
+          hk_peer = extract_section(body, "香港同业信息（第8部分）")
+          table6 = extract_section(body, "表6信息")
+          notes = extract_section(body, "备注")
+
+          os.makedirs("inputs/hk_peer_info", exist_ok=True)
+          os.makedirs("inputs/table6", exist_ok=True)
+
+          if hk_peer:
+              with open("inputs/hk_peer_info/from_issue.txt", "w", encoding="utf-8") as f:
+                  f.write(hk_peer)
+              print(f"Saved HK peer info ({len(hk_peer)} chars)")
+
+          if table6:
+              with open("inputs/table6/from_issue.txt", "w", encoding="utf-8") as f:
+                  f.write(table6)
+              print(f"Saved Table 6 data ({len(table6)} chars)")
+
+          if period:
+              with open("inputs/period.txt", "w", encoding="utf-8") as f:
+                  f.write(period)
+              print(f"Report period: {period}")
+
+          if notes:
+              with open("inputs/notes.txt", "w", encoding="utf-8") as f:
+                  f.write(notes)
+
+          SCRIPT
+
+      - name: Commit extracted data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add inputs/
+          git diff --staged --quiet && echo "No new data" && exit 0
+
+          git commit -m "data: extract biweekly input from issue #${{ github.event.issue.number }}"
+          git push
+
+      - name: Comment on issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ 数据已提取并保存到 `inputs/` 目录。\n\n请确保ETF Excel文件和上期双周报已上传，然后触发双周报生成。'
+            })
