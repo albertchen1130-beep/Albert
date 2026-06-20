@@ -13,8 +13,16 @@ on:
           - '7'
           - '14'
           - '30'
+      mode:
+        description: 'Run mode / 运行模式'
+        required: false
+        default: 'check'
+        type: choice
+        options:
+          - 'check'
+          - 'generate'
 
-  # Automatic trigger: every other Monday at 9:00 AM UTC
+  # Automatic trigger: 1st and 15th of each month
   schedule:
     - cron: '0 9 1,15 * *'
 
@@ -22,20 +30,36 @@ permissions:
   contents: write
 
 jobs:
-  generate-report:
+  check-inputs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for accurate git log
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - name: Generate biweekly report
+      - name: Check input files
+        run: python 双周报/run_agents.py
+
+  generate-git-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Generate git activity report
         env:
           REPORT_PERIOD: ${{ github.event.inputs.period || '14' }}
         run: python scripts/biweekly_report.py
