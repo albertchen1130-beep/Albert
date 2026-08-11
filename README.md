@@ -1,58 +1,87 @@
-# Mobile Biweekly Report / 手机双周报
+# 双周报自动生成系统
 
-在手机上一键生成双周报，无需电脑。
+在手机上全程完成金融双周报的生成与审核，无需电脑。通过 Claude Code 多 Agent 协作，自动完成报告撰写、编译和张总审核。
 
-## How It Works / 工作原理
+## 快速开始
 
-- **GitHub Actions** 提供 `workflow_dispatch` 触发器
-- 你可以通过 **GitHub 手机 App** 直接触发运行
-- 脚本自动分析 Git 提交历史，生成结构化的双周报
-- 报告自动保存到 `reports/` 目录，并作为 Artifact 可下载
+### 1. 上传输入文件
 
-## How to Run from Phone / 手机上如何运行
+通过 GitHub 手机 App 将以下文件上传到 `inputs/` 目录：
 
-### Step 1: 安装 GitHub 手机 App
+| 文件 | 说明 |
+|------|------|
+| `上期双周报.md` | 上一期双周报（用于格式参照） |
+| `香港同业信息.md` | 第8节香港同业信息文字 |
+| `表6信息.md` | 表6相关数据 |
+| `ETF数据.xlsx` / `.csv` | 表4-5的ETF数据 |
 
-- iOS: [App Store](https://apps.apple.com/app/github/id1477376905)
-- Android: [Google Play](https://play.google.com/store/apps/details?id=com.github.android)
+### 2. 启动 Claude Code 会话
 
-### Step 2: 在手机上触发双周报
-
-1. 打开 GitHub App，进入本仓库
-2. 点击底部 **Actions** 标签
-3. 选择 **"Biweekly Report / 双周报"** workflow
-4. 点击 **"Run workflow"**
-5. 选择报告周期（7天 / 14天 / 30天）
-6. 点击确认运行
-
-### Step 3: 查看报告
-
-- **在线查看**: Actions 运行完成后，点击进入该次运行，在 **Summary** 页面直接查看报告内容
-- **下载文件**: 在 Artifacts 区域下载 `.md` 报告文件
-- **仓库中查看**: 报告也会自动提交到 `reports/` 目录
-
-## Auto Schedule / 自动定时
-
-除了手动触发，workflow 也会在每月 **1日和15日** 的 UTC 9:00（北京时间 17:00）自动运行。
-
-## Report Contents / 报告内容
-
-每份双周报包含：
-
-| Section / 板块 | Description / 说明 |
-|---|---|
-| Summary / 概览 | 提交数、贡献者、文件变更、代码增删统计 |
-| By Contributor / 按贡献者 | 每位贡献者的提交明细 |
-| Timeline / 时间线 | 按日期排列的提交记录 |
-
-## Project Structure / 项目结构
+在 Claude Code（网页/手机）中打开本仓库，输入：
 
 ```
-.
-├── .github/workflows/
-│   └── biweekly-report.yml    # GitHub Actions workflow
-├── scripts/
-│   └── biweekly_report.py     # Report generation script
-├── reports/                   # Generated reports (auto-created)
-└── README.md
+生成双周报
+```
+
+### 3. 系统自动运行 7 个 Agent
+
+| Agent | 职责 |
+|-------|------|
+| 1. 输入解析 | 读取并解析所有输入文件 |
+| 2. 上期回顾 | 分析上期报告的格式和结构 |
+| 3. ETF分析 | 生成表4-5（基于ETF数据） |
+| 4. 表6生成 | 生成表6内容 |
+| 5. 香港同业 | 整理第8节香港同业信息 |
+| 6. 报告编译 | 汇总编译完整双周报 |
+| 7. 张总审核 | 审核报告并自动修改 |
+
+### 4. 获取结果
+
+- 最终报告：`outputs/双周报_YYYY-MM-DD.md`
+- 审核意见：`outputs/审核意见.md`
+- 自动创建 PR 供团队查看
+
+## 项目结构
+
+```
+Albert/
+├── CLAUDE.md              # 工作流编排（Claude Code 自动读取）
+├── agents/                # 7个Agent的提示词定义
+│   ├── 01_输入解析.md
+│   ├── 02_上期回顾.md
+│   ├── 03_ETF分析.md
+│   ├── 04_表6生成.md
+│   ├── 05_香港同业.md
+│   ├── 06_报告编译.md
+│   └── 07_张总审核.md
+├── inputs/                # 用户上传输入文件
+├── outputs/               # 生成的报告和审核意见
+├── templates/             # 报告模板
+├── scripts/               # 工具脚本
+└── reports/               # 历史报告存档
+```
+
+## 工作流程图
+
+```
+用户上传输入文件 (手机)
+        ↓
+   Agent 1: 输入解析
+        ↓
+   Agent 2: 上期回顾 ──→ 格式指南
+        ↓
+   ┌────┼────┐
+   ↓    ↓    ↓
+Agent3 Agent4 Agent5   (并行处理)
+ETF   表6   香港同业
+   ↓    ↓    ↓
+   └────┼────┘
+        ↓
+   Agent 6: 报告编译
+        ↓
+   Agent 7: 张总审核
+        ↓
+   最终双周报 + 审核意见
+        ↓
+   创建 PR → 团队查看
 ```
