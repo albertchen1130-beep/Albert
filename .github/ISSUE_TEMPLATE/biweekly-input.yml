@@ -1,0 +1,42 @@
+name: 双周报数据提交
+description: 通过 Issue 提交双周报的文字数据（适合手机操作）
+title: "双周报数据 - "
+labels: ["biweekly-input"]
+body:
+  - type: input
+    id: period
+    attributes:
+      label: 报告期间
+      description: 本期双周报覆盖的时间范围
+      placeholder: "2026-04-15 ~ 2026-04-25"
+    validations:
+      required: true
+
+  - type: textarea
+    id: hk_peer_info
+    attributes:
+      label: 香港同业信息（第8部分）
+      description: 请粘贴香港同业信息的文字材料
+      placeholder: |
+        1. xxx银行近期推出...
+        2. xxx机构宣布...
+    validations:
+      required: true
+
+  - type: textarea
+    id: table6_info
+    attributes:
+      label: 表6信息
+      description: 请粘贴表6相关数据或说明
+      placeholder: 表6数据内容...
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 备注
+      description: 其他需要说明的事项（可选）
+      placeholder: 如有特殊说明请填写...
+    validations:
+      required: false
